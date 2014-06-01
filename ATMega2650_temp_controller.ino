@@ -1,17 +1,19 @@
 #define SERIAL_INPUT_LENGHT 4
 #define NR_OF_MEAN_SAMPLES 5
-#define MIN_INTEGRAL -5
-#define MAX_INTEGRAL 20
+#define USE_PID_INTEGRAL_THRESHOLD 12
+#define MIN_INTEGRAL -30
+#define MAX_INTEGRAL 30
 #define DEBUG 1
-#define PID_DEBUG 1
+#define PID_DEBUG 0
 #define TEMP_DEBUG 0
 #define SERIAL_DEBUG 0
 #define RESISTANCE_OFFSET (82)
 #define PT100_TABLE_STEP_DEG 30.0
 #define MIN_TEMP (-10)
 #define MAX_TEMP 680
-#define PID_INTERVAL_MS 100
+#define PID_INTERVAL_MS 50
 #define DT ((float)PID_INTERVAL_MS/1000.0)
+#define HEATER_CURVE_STEP 50
 enum STATE {
     TEMP_MEASURE,
     CHECK_SERIAL,
@@ -23,6 +25,8 @@ float const Pt100[] = {    96.09, 107.79, 119.40, 130.90, 142.29, 153.58,
                           164.77, 175.86, 186.84, 197.71, 208.48, 219.15,
                           229.72, 240.18, 250.35, 260.78, 270.93, 280.98,
                           290.92, 300.75, 310.49, 320.12, 329.64, 339.06 };
+uint8_t const one_heater_curve[] = {0, 1, 2, 4, 7, 10, 13, 17, 23, 28, 34, 41, 48, 55, 62};
+
 STATE State;
 uint8_t TEMP_PIN = 15;
 uint8_t PWM_PIN = 2;
@@ -30,13 +34,14 @@ uint64_t next_loop_iteration = 0;
 int32_t current_temp = 0;
 int32_t desired_temp = 0;
 uint64_t current_time;
+uint8_t* selected_heater_curve = NULL; 
 
 float volt_res_slope = 0.016145;
 float PID_integral = 0;
 float previous_error = 0;
-float Kp = 1;
-float Ki = 0.3;
-float Kd = 0.03;
+float Kp = 0.6;
+float Ki = 0.15;
+float Kd = 0.0;
 uint8_t pwm_output = 0;
 
 void setup() {
@@ -50,6 +55,7 @@ void setup() {
   }
   analogWrite(PWM_PIN, pwm_output);
   State = TEMP_MEASURE;
+  selected_heater_curve = const_cast<uint8_t*>(one_heater_curve);
 }
 
 void loop() {
@@ -59,6 +65,7 @@ void loop() {
   {
     case TEMP_MEASURE:
       GetTemp();
+      Serial.println(current_temp);
       State = CHECK_SERIAL;
       break;
     case CHECK_SERIAL:
@@ -96,7 +103,11 @@ void PID_Calc()
 //  float dt = (int)PID_INTERVAL_MS / 1000;
 //  float dt = 0.1;
   PID_integral += error * DT;
-  if (PID_integral < MIN_INTEGRAL)
+  if (abs(error) > USE_PID_INTEGRAL_THRESHOLD)
+  {
+    PID_integral = 0;
+  }
+  else if (PID_integral < MIN_INTEGRAL)
   {
     PID_integral = MIN_INTEGRAL;
   }
@@ -106,6 +117,12 @@ void PID_Calc()
   }
   float derivative = (error - previous_error) / DT;
   float out = (Kp * error + Ki * PID_integral + Kd * derivative);
+
+  uint8_t baseline = selected_heater_curve[desired_temp / HEATER_CURVE_STEP];
+  float slope = (float)(selected_heater_curve[(desired_temp / HEATER_CURVE_STEP) + 1] - baseline) / (float)HEATER_CURVE_STEP;
+  baseline += (desired_temp % HEATER_CURVE_STEP) * slope;
+  out += baseline;
+
   if (out > 255)
   {
     pwm_output = 255;
@@ -133,8 +150,8 @@ void PID_Calc()
     Serial.print(derivative);
     Serial.print(" output, ");
     Serial.print(pwm_output);
-    Serial.print(" dt, ");
-    Serial.print(DT);
+    Serial.print(" baseline, ");
+    Serial.print(baseline);
     Serial.print(" prev_error, ");
     Serial.println(previous_error); 
   }
@@ -144,7 +161,17 @@ void CheckSerial()
 {
   int temperature = MIN_TEMP;
   if (Serial.available() > 0) {
-    temperature = Serial.parseInt();
+    int c = Serial.peek();
+    Serial.print(c);
+    //Serial.print("vafan");
+    if (c == 'C')
+    {
+      c = Serial.read();
+      Serial.println("OK");
+    }
+    else {
+      temperature = Serial.parseInt();
+    }
   }
   if ((temperature > MIN_TEMP) && (temperature < MAX_TEMP))
   {
