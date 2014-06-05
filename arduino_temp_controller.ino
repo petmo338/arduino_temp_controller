@@ -1,7 +1,7 @@
 #define SERIAL_INPUT_LENGHT 4
 #define NR_OF_MEAN_SAMPLES 5
 #define USE_PID_INTEGRAL_THRESHOLD 12
-#define MIN_INTEGRAL -30
+#define MIN_INTEGRAL -50
 #define MAX_INTEGRAL 30
 #define DEBUG 1
 #define PID_DEBUG 0
@@ -25,7 +25,7 @@ float const Pt100[] = {    96.09, 107.79, 119.40, 130.90, 142.29, 153.58,
                           164.77, 175.86, 186.84, 197.71, 208.48, 219.15,
                           229.72, 240.18, 250.35, 260.78, 270.93, 280.98,
                           290.92, 300.75, 310.49, 320.12, 329.64, 339.06 };
-uint8_t const one_heater_curve[] = {0, 1, 2, 4, 7, 10, 13, 17, 23, 28, 34, 41, 48, 55, 62};
+uint8_t const one_heater_curve[] = {0, 1, 2, 4, 7, 10, 13, 17, 22, 28, 33, 40, 48, 56, 63};
 
 STATE State;
 uint8_t TEMP_PIN = 15;
@@ -40,7 +40,7 @@ float volt_res_slope = 0.016145;
 float PID_integral = 0;
 float previous_error = 0;
 float Kp = 0.6;
-float Ki = 0.15;
+float Ki = 0.25;
 float Kd = 0.0;
 uint8_t pwm_output = 0;
 
@@ -65,7 +65,6 @@ void loop() {
   {
     case TEMP_MEASURE:
       GetTemp();
-      Serial.println(current_temp);
       State = CHECK_SERIAL;
       break;
     case CHECK_SERIAL:
@@ -162,15 +161,29 @@ void CheckSerial()
   int temperature = MIN_TEMP;
   if (Serial.available() > 0) {
     int c = Serial.peek();
-    Serial.print(c);
+    //Serial.print(c);
     //Serial.print("vafan");
     if (c == 'C')
     {
       c = Serial.read();
       Serial.println("OK");
     }
-    else {
+    else if (c == 'S')
+    {
+      Serial.read();
       temperature = Serial.parseInt();
+    }
+    else if (c == 'T')
+    {
+      Serial.read();      
+      Serial.println(current_temp);
+    }
+    else
+    {
+      while (Serial.available() > 0)
+      {
+        Serial.read();
+      }
     }
   }
   if ((temperature > MIN_TEMP) && (temperature < MAX_TEMP))
@@ -208,7 +221,7 @@ void GetTemp()
   if (not_found == true)
   {
     current_temp = MAX_TEMP;
-    Serial.print("apa");
+    Serial.print("Resistance too high");
   }
   if (TEMP_DEBUG != 0)
   {
